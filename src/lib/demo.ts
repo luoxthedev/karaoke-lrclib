@@ -11,9 +11,11 @@ export const demoTrack: Track = {
   artist: "SoundHelix — démo",
   album: "Démo hors-ligne",
   artwork: null,
-  previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+  artworkMirrors: [],
+  audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
   durationMs: 372000,
   genre: "Démo",
+  source: "demo",
 };
 
 const DEMO_LRC = `[ar:Démo]

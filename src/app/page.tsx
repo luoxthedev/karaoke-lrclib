@@ -5,6 +5,7 @@ import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import {
   ArrowLeft,
   FlaskConical,
+  KeyRound,
   Music2,
   RefreshCw,
   SearchX,
@@ -19,11 +20,11 @@ import SearchBar from "@/components/SearchBar";
 import SongCard from "@/components/SongCard";
 import Toast from "@/components/Toast";
 import type { ToastData } from "@/components/Toast";
-import { fetchLyrics, fetchSearch } from "@/lib/api";
+import { ApiError, fetchLyrics, fetchSearch } from "@/lib/api";
 import { demoTrack, getDemoLyrics } from "@/lib/demo";
 import type { LyricsResult, Track } from "@/lib/types";
 
-type SearchStatus = "idle" | "loading" | "done" | "error";
+type SearchStatus = "idle" | "loading" | "done" | "error" | "nokey";
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -67,9 +68,13 @@ export default function Home() {
         if (searchSeq.current !== id) return;
         setResults(r);
         setSearchStatus("done");
-      } catch {
+      } catch (e) {
         if (searchSeq.current !== id) return;
-        setSearchStatus("error");
+        if (e instanceof ApiError && e.code === "NO_API_KEY") {
+          setSearchStatus("nokey");
+        } else {
+          setSearchStatus("error");
+        }
       }
     }, 450);
     return () => clearTimeout(timer);
@@ -245,7 +250,7 @@ export default function Home() {
                   className="mb-5 inline-flex items-center gap-1.5 rounded-full bg-white/60 px-4 py-1.5 text-xs font-semibold text-sky-600 ring-1 ring-white/70"
                 >
                   <Sparkles size={14} />
-                  Propulsé par LRCLIB
+                  Audio Audius · Paroles LRCLIB
                 </motion.div>
                 <h1 className="text-4xl font-extrabold leading-tight tracking-tight text-slate-900 sm:text-5xl">
                   <motion.span
@@ -271,8 +276,9 @@ export default function Home() {
                   transition={{ duration: 0.5, delay: 0.3 }}
                   className="mx-auto mt-4 max-w-xl text-slate-500"
                 >
-                  Recherchez un titre ou un artiste, lancez l&apos;extrait et
-                  chantez avec les paroles synchronisées en temps réel.
+                  Recherchez un titre ou un artiste, lancez le morceau en
+                  intégral et chantez avec les paroles synchronisées en temps
+                  réel.
                 </motion.p>
               </div>
 
@@ -350,6 +356,45 @@ export default function Home() {
                   </motion.div>
                 )}
 
+                {searchStatus === "nokey" && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="glass mx-auto flex max-w-md flex-col items-center gap-3 rounded-3xl p-8 text-center"
+                  >
+                    <span className="rounded-full bg-sky-100 p-4 text-sky-500">
+                      <KeyRound size={28} />
+                    </span>
+                    <p className="font-semibold text-slate-700">
+                      Clé API Audius manquante
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      Créez une application gratuite sur{" "}
+                      <a
+                        href="https://audius.co/settings"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-sky-600 underline-offset-2 hover:underline"
+                      >
+                        audius.co/settings
+                      </a>{" "}
+                      (« Manage Your Apps »), puis ajoutez la clé dans{" "}
+                      <code className="rounded-md bg-white/70 px-1.5 py-0.5 text-xs ring-1 ring-slate-200">
+                        .env.local
+                      </code>{" "}
+                      comme expliqué dans le README — ou explorez le mode
+                      démo.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={selectDemo}
+                      className="mt-1 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:brightness-110"
+                    >
+                      Essayer la démo
+                    </button>
+                  </motion.div>
+                )}
+
                 {searchStatus === "done" && results.length === 0 && (
                   <motion.div
                     initial={{ opacity: 0, y: 16 }}
@@ -420,12 +465,12 @@ export default function Home() {
                     : undefined
                 }
                 badge={
-                  selected.id.startsWith("demo") ? "Démo" : "Extrait 30 s"
+                  selected.source === "demo" ? "Démo" : "Audius · intégral"
                 }
                 onTimeUpdate={setCurrentTime}
                 onAudioError={() =>
                   showToast(
-                    "Impossible de lire l'extrait audio.",
+                    "Impossible de lire le flux audio de ce morceau.",
                     "error"
                   )
                 }
@@ -448,8 +493,8 @@ export default function Home() {
       {/* ------------------------- Footer ------------------------- */}
       <footer className="border-t border-white/50 bg-white/30 py-5 backdrop-blur-xl">
         <p className="mx-auto max-w-6xl px-4 text-center text-xs text-slate-400">
-          Recherche & extraits : iTunes Search API · Paroles : LRCLIB · Fait
-          avec Next.js, Tailwind CSS et Framer Motion
+          Recherche & audio : Audius · Paroles : LRCLIB · Fait avec Next.js,
+          Tailwind CSS et Framer Motion
         </p>
       </footer>
 

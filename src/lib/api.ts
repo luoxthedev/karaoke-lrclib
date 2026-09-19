@@ -1,27 +1,31 @@
+import {
+  AUDIUS_APP_FALLBACK,
+  buildStreamUrl,
+  searchAudiusTracks,
+} from "./audius";
 import { parseLRC } from "./lrc";
 import type { LyricsResult, Track } from "./types";
 
 /* ------------------------------------------------------------------ */
 /*  Couche d'accès aux données côté client.                            */
 /*  Stratégie : on passe d'abord par nos routes API Node.js            */
-/*  (/api/search, /api/lyrics). Si le serveur est injoignable           */
-/*  (ex. bac à sable sans sortie réseau), on bascule en repli           */
-/*  direct navigateur → API publiques (iTunes + LRCLIB).                */
+/*  (/api/search, /api/stream, /api/lyrics). Si le serveur est         */
+/*  injoignable ou sans clé, on bascule en repli direct                */
+/*  navigateur → API publiques (autorisé par la doc Audius pour        */
+/*  la lecture seule, via NEXT_PUBLIC_AUDIUS_API_KEY).                 */
 /* ------------------------------------------------------------------ */
 
-function mapItunesSong(r: Record<string, unknown>): Track {
-  const art = typeof r.artworkUrl100 === "string" ? r.artworkUrl100 : null;
-  return {
-    id: String(r.trackId ?? `${r.artistName}-${r.trackName}`),
-    title: typeof r.trackName === "string" ? r.trackName : "Titre inconnu",
-    artist:
-      typeof r.artistName === "string" ? r.artistName : "Artiste inconnu",
-    album: typeof r.collectionName === "string" ? r.collectionName : "",
-    artwork: art ? art.replace("100x100bb", "600x600bb") : null,
-    previewUrl: typeof r.previewUrl === "string" ? r.previewUrl : null,
-    durationMs: typeof r.trackTimeMillis === "number" ? r.trackTimeMillis : null,
-    genre: typeof r.primaryGenreName === "string" ? r.primaryGenreName : undefined,
-  };
+const APP_NAME =
+  process.env.NEXT_PUBLIC_AUDIUS_APP_NAME || AUDIUS_APP_FALLBACK;
+const PUBLIC_KEY = process.env.NEXT_PUBLIC_AUDIUS_API_KEY || "";
+
+export class ApiError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
 }
 
 export async function fetchSearch(q: string): Promise<Track[]> {
@@ -32,25 +36,45 @@ export async function fetchSearch(q: string): Promise<Track[]> {
       const data = (await res.json()) as { results?: Track[] };
       if (Array.isArray(data.results)) return data.results;
     }
+    if (res.status === 503) {
+      const data = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (data?.error === "NO_API_KEY") {
+        throw new ApiError("NO_API_KEY", "Missing Audius API key (server)");
+      }
+    }
     throw new Error(`server search: ${res.status}`);
   } catch (serverError) {
-    // 2) Repli direct (le navigateur a son propre accès réseau)
+    // 2) Repli direct navigateur → Audius
+    if (!PUBLIC_KEY && serverError instanceof ApiError) throw serverError;
     try {
-      const params = new URLSearchParams({
-        term: q,
-        entity: "song",
-        limit: "24",
-        country: "FR",
-      });
-      const res = await fetch(`https://itunes.apple.com/search?${params}`);
-      if (!res.ok) throw new Error(`itunes: ${res.status}`);
-      const data = (await res.json()) as {
-        results?: Record<string, unknown>[];
-      };
-      return (data.results ?? []).map(mapItunesSong);
+      return await searchAudiusTracks(
+        q,
+        { apiKey: PUBLIC_KEY, appName: APP_NAME },
+        24
+      );
     } catch {
       throw serverError;
     }
+  }
+}
+
+/**
+ * Résout l'URL audio jouable d'un morceau Audius.
+ * 1) /api/stream (résolution serveur de la redirection), puis
+ * 2) URL /stream directe en repli (le <audio> suit la redirection).
+ */
+export async function fetchStreamUrl(trackId: string): Promise<string> {
+  try {
+    const res = await fetch(`/api/stream?trackId=${encodeURIComponent(trackId)}`);
+    if (res.ok) {
+      const data = (await res.json()) as { url?: unknown };
+      if (typeof data.url === "string" && data.url) return data.url;
+    }
+    throw new Error(`server stream: ${res.status}`);
+  } catch {
+    return buildStreamUrl(trackId, APP_NAME);
   }
 }
 

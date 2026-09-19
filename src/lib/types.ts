@@ -1,16 +1,24 @@
-/** Morceau issu de la recherche (iTunes Search API, via /api/search). */
+/** Morceau issu de la recherche Audius (via /api/search). */
 export interface Track {
   id: string;
   title: string;
   artist: string;
   album: string;
-  /** URL de la pochette en haute résolution (ou null → placeholder). */
+  /** URL principale de la pochette (ou null → placeholder). */
   artwork: string | null;
-  /** URL de l'extrait audio à jouer dans <audio> (ou null). */
-  previewUrl: string | null;
+  /** Hôtes miroirs de la pochette (repli au chargement, cf. doc Audius). */
+  artworkMirrors: string[];
+  /**
+   * URL audio prête à jouer dans <audio>.
+   * `null` pour Audius : le flux est résolu paresseusement via /api/stream.
+   */
+  audioUrl: string | null;
   /** Durée totale du morceau en ms (ou null). */
   durationMs: number | null;
   genre?: string;
+  source: "audius" | "demo";
+  playCount?: number;
+  permalink?: string;
 }
 
 /** Un vers synchronisé. */
