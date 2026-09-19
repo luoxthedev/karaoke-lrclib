@@ -12,16 +12,19 @@ import type { CSSProperties } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
-  Music2,
+  AudioLines,
+  Loader2,
   Pause,
   Play,
+  RefreshCw,
   SkipBack,
   SkipForward,
-  Timer,
   Volume1,
   Volume2,
   VolumeX,
 } from "lucide-react";
+import TrackArtworkImage from "@/components/TrackArtworkImage";
+import { fetchStreamUrl } from "@/lib/api";
 import { formatTime } from "@/lib/lrc";
 import type { Track } from "@/lib/types";
 
@@ -41,6 +44,8 @@ interface Props {
   onAudioError: () => void;
 }
 
+type StreamStatus = "idle" | "loading" | "ready" | "error";
+
 function sliderFill(pct: number): CSSProperties {
   const p = Math.max(0, Math.min(100, pct));
   return {
@@ -48,7 +53,7 @@ function sliderFill(pct: number): CSSProperties {
   } as CSSProperties;
 }
 
-/** Lecteur audio custom : pochette, progression, contrôles, volume. */
+/** Lecteur audio : pochette, flux Audius, progression, contrôles, volume. */
 const Player = forwardRef<PlayerHandle, Props>(function Player(
   {
     track,
@@ -67,23 +72,55 @@ const Player = forwardRef<PlayerHandle, Props>(function Player(
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [audioError, setAudioError] = useState(false);
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [volume, setVolume] = useState(() => {
     if (typeof window === "undefined") return 0.9;
     const saved = Number(window.localStorage.getItem("klr-volume"));
     return Number.isFinite(saved) && saved >= 0 && saved <= 1 ? saved : 0.9;
   });
   const [muted, setMuted] = useState(false);
+  const streamSeq = useRef(0);
 
-  const canPlay = !!track.previewUrl && !audioError;
+  const canPlay = streamStatus === "ready" && !!streamUrl;
 
-  // Nouveau morceau → reset + tentative de lecture auto
+  // Résolution du flux : URL directe (démo) ou /api/stream (Audius)
+  const resolveStream = useCallback(() => {
+    const id = ++streamSeq.current;
+    setStreamStatus("loading");
+    setStreamUrl(null);
+    fetchStreamUrl(track.id)
+      .then((url) => {
+        if (streamSeq.current !== id) return;
+        setStreamUrl(url);
+        setStreamStatus("ready");
+      })
+      .catch(() => {
+        if (streamSeq.current !== id) return;
+        setStreamStatus("error");
+        onAudioError();
+      });
+  }, [track.id, onAudioError]);
+
+  // Nouveau morceau → reset + résolution du flux
   useEffect(() => {
+    streamSeq.current++;
     setTime(0);
     setDuration(0);
     setPlaying(false);
-    setAudioError(false);
     onTimeUpdate(0);
+    if (track.audioUrl) {
+      setStreamUrl(track.audioUrl);
+      setStreamStatus("ready");
+    } else {
+      resolveStream();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track.id]);
+
+  // Lecture auto dès que le flux est prêt
+  useEffect(() => {
+    if (!streamUrl) return;
     const el = audioRef.current;
     if (el) {
       el.currentTime = 0;
@@ -91,8 +128,7 @@ const Player = forwardRef<PlayerHandle, Props>(function Player(
         /* autoplay bloqué : l'utilisateur appuiera sur lecture */
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track.id]);
+  }, [streamUrl]);
 
   // Volume
   useEffect(() => {
@@ -159,17 +195,15 @@ const Player = forwardRef<PlayerHandle, Props>(function Player(
           transition={{ type: "spring", stiffness: 260, damping: 30 }}
           className="relative mx-auto aspect-square w-full max-w-[280px] overflow-hidden rounded-3xl shadow-[0_30px_70px_-20px_rgba(56,130,200,0.5)] md:mx-0 md:max-w-none"
         >
-          {track.artwork ? (
-            <img
-              src={track.artwork}
-              alt={`Pochette de ${track.title}`}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-sky-300 via-blue-400 to-indigo-400">
-              <Music2 size={72} className="text-white/90" />
-            </div>
-          )}
+          <TrackArtworkImage
+            url={track.artwork}
+            mirrors={track.artworkMirrors}
+            alt={`Pochette de ${track.title}`}
+            eager
+            className="h-full w-full object-cover"
+            fallbackClassName="flex h-full w-full items-center justify-center bg-gradient-to-br from-sky-300 via-blue-400 to-indigo-400"
+            fallbackIconSize={72}
+          />
           {/* Reflet glass */}
           <div
             aria-hidden
@@ -202,7 +236,7 @@ const Player = forwardRef<PlayerHandle, Props>(function Player(
               <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
                 {badge && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-600 ring-1 ring-sky-300/50">
-                    <Timer size={12} />
+                    <AudioLines size={12} />
                     {badge}
                   </span>
                 )}
@@ -263,7 +297,9 @@ const Player = forwardRef<PlayerHandle, Props>(function Player(
               aria-label={playing ? "Pause" : "Lecture"}
               className="rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 p-4 text-white shadow-[0_16px_40px_-12px_rgba(56,189,248,0.8)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:saturate-50 sm:p-5"
             >
-              {playing ? (
+              {streamStatus === "loading" ? (
+                <Loader2 size={26} className="animate-spin" />
+              ) : playing ? (
                 <Pause size={26} fill="currentColor" />
               ) : (
                 <Play size={26} fill="currentColor" className="translate-x-[1px]" />
@@ -308,11 +344,28 @@ const Player = forwardRef<PlayerHandle, Props>(function Player(
             />
           </div>
 
-          {!canPlay && (
-            <p className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-amber-100/60 px-4 py-2.5 text-sm text-amber-700 ring-1 ring-amber-200/60 md:justify-start">
-              <AlertCircle size={16} className="shrink-0" />
-              Aperçu audio indisponible pour ce titre.
+          {streamStatus === "loading" && (
+            <p className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-400 md:justify-start">
+              <Loader2 size={16} className="animate-spin text-sky-500" />
+              Connexion au flux Audius…
             </p>
+          )}
+
+          {streamStatus === "error" && (
+            <div className="mt-4 flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-amber-100/60 px-4 py-3 text-sm text-amber-700 ring-1 ring-amber-200/60 sm:flex-row md:justify-start">
+              <span className="flex items-center gap-2">
+                <AlertCircle size={16} className="shrink-0" />
+                Impossible de lire ce morceau pour le moment.
+              </span>
+              <button
+                type="button"
+                onClick={resolveStream}
+                className="flex shrink-0 items-center gap-1.5 rounded-full bg-white/80 px-3.5 py-1.5 text-xs font-semibold text-sky-600 ring-1 ring-white transition hover:bg-white"
+              >
+                <RefreshCw size={13} />
+                Réessayer
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -320,7 +373,7 @@ const Player = forwardRef<PlayerHandle, Props>(function Player(
       {/* Élément audio réel */}
       <audio
         ref={audioRef}
-        src={track.previewUrl ?? undefined}
+        src={streamUrl ?? undefined}
         preload="metadata"
         onTimeUpdate={(e) => {
           const t = e.currentTarget.currentTime;
@@ -335,8 +388,8 @@ const Player = forwardRef<PlayerHandle, Props>(function Player(
           if (hasNext) onNext();
         }}
         onError={() => {
-          if (track.previewUrl) {
-            setAudioError(true);
+          if (streamUrl) {
+            setStreamStatus("error");
             onAudioError();
           }
         }}
